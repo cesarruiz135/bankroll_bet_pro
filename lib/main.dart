@@ -62,8 +62,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final double _capitalInicial = 1000.0;
-  final double _porcentajeRiesgo = 5.0;
+  double _capitalInicial = 1000.0;
+  String _mesGestion = "Mayo 2025";
+  final double _porcentajeRiesgoDefault = 5.0;
   
   List<LogDia> _logs = [];
 
@@ -76,6 +77,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _cargarDatos() async {
     final prefs = await SharedPreferences.getInstance();
     final String? logsString = prefs.getString('logs_bankroll');
+    
+    setState(() {
+      _capitalInicial = prefs.getDouble('capital_inicial') ?? 1000.0;
+      _mesGestion = prefs.getString('mes_gestion') ?? "Mayo 2025";
+    });
+
     if (logsString != null) {
       final List<dynamic> jsonList = jsonDecode(logsString);
       setState(() {
@@ -86,10 +93,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _logs = [
           LogDia(dia: 1, bancaInicial: 1000.0, apuesta: 50.0, gano: true, bancaFinal: 1100.0),
           LogDia(dia: 2, bancaInicial: 1100.0, apuesta: 55.0, gano: false, bancaFinal: 1045.0),
-          LogDia(dia: 3, bancaInicial: 1045.0, apuesta: 52.25, gano: true, bancaFinal: 1149.50),
-          LogDia(dia: 4, bancaInicial: 1149.50, apuesta: 57.48, gano: true, bancaFinal: 1264.45),
-          LogDia(dia: 5, bancaInicial: 1264.45, apuesta: 63.22, gano: false, bancaFinal: 1201.23),
-          LogDia(dia: 6, bancaInicial: 1201.23, apuesta: 60.06, gano: true, bancaFinal: 1261.29),
         ];
       });
       _guardarDatos();
@@ -100,39 +103,44 @@ class _HomeScreenState extends State<HomeScreen> {
     final prefs = await SharedPreferences.getInstance();
     final String jsonString = jsonEncode(_logs.map((item) => item.toJson()).toList());
     await prefs.setString('logs_bankroll', jsonString);
+    await prefs.setDouble('capital_inicial', _capitalInicial);
+    await prefs.setString('mes_gestion', _mesGestion);
   }
 
   double get _capitalActual => _logs.isEmpty ? _capitalInicial : _logs.last.bancaFinal;
   double get _gananciaPerdida => _capitalActual - _capitalInicial;
   double get _roi => _capitalInicial > 0 ? (_gananciaPerdida / _capitalInicial) * 100 : 0;
-  
   double get _cuotaPromedio => 2.0;
 
-  void _mostrarFormularioAgregar() {
-    final TextEditingController cuotaController = TextEditingController(text: "2.0");
+  void _mostrarFormularioConfiguracion() {
+    final TextEditingController capitalController = TextEditingController(text: _capitalInicial.toString());
+    final TextEditingController mesController = TextEditingController(text: _mesGestion);
 
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
           backgroundColor: const Color(0xFF141C26),
-          title: const Text("Registrar Operación Real", style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text("Configurar Parámetros", style: TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "Banca sugerida para apostar: \$${(_capitalActual * (_porcentajeRiesgo / 100)).toStringAsFixed(2)} (Riesgo $_porcentajeRiesgo%)",
-                style: const TextStyle(color: Colors.grey, fontSize: 13),
+              TextField(
+                controller: mesController,
+                decoration: const InputDecoration(
+                  labelText: "Mes de Gestión",
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.calendar_month),
+                ),
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: cuotaController,
+                controller: capitalController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
-                  labelText: "Cuota de la apuesta",
+                  labelText: "Capital Inicial (\$)",
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.trending_up),
+                  prefixIcon: Icon(Icons.attach_money),
                 ),
               ),
             ],
@@ -143,22 +151,16 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
               onPressed: () {
-                double cuota = double.tryParse(cuotaController.text) ?? 2.0;
-                _guardarNuevaOperacion(cuota, false);
+                setState(() {
+                  _mesGestion = mesController.text;
+                  _capitalInicial = double.tryParse(capitalController.text) ?? _capitalInicial;
+                });
+                _guardarDatos();
                 Navigator.pop(context);
               },
-              child: const Text("Perdida ❌", style: TextStyle(color: Colors.white)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-              onPressed: () {
-                double cuota = double.tryParse(cuotaController.text) ?? 2.0;
-                _guardarNuevaOperacion(cuota, true);
-                Navigator.pop(context);
-              },
-              child: const Text("Ganada  ", style: TextStyle(color: Colors.white)),
+              child: const Text("Guardar", style: TextStyle(color: Colors.white)),
             ),
           ],
         );
@@ -166,19 +168,104 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _guardarNuevaOperacion(double cuota, bool gano) {
+  void _mostrarFormularioAgregar() {
+    final TextEditingController cuotaController = TextEditingController(text: "2.0");
+    double sugerenciaDinero = _capitalActual * (_porcentajeRiesgoDefault / 100);
+    final TextEditingController apuestaController = TextEditingController(text: sugerenciaDinero.toStringAsFixed(2));
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            double dineroApuesta = double.tryParse(apuestaController.text) ?? 0.0;
+            double porcentajeCalculado = _capitalActual > 0 ? (dineroApuesta / _capitalActual) * 100 : 0.0;
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF141C26),
+              title: const Text("Registrar Operación", style: TextStyle(fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: cuotaController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: "Cuota de la apuesta",
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.trending_up),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: apuestaController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (val) {
+                      setDialogState(() {});
+                    },
+                    decoration: const InputDecoration(
+                      labelText: "Cantidad a apostar (\$)",
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.money),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    "Impacto en la Banca: ${porcentajeCalculado.toStringAsFixed(2)}% del Bank total",
+                    style: TextStyle(
+                      color: porcentajeCalculado > 10 ? Colors.redAccent : Colors.greenAccent, 
+                      fontSize: 13, 
+                      fontWeight: FontWeight.bold
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                  onPressed: () {
+                    double cuota = double.tryParse(cuotaController.text) ?? 2.0;
+                    double monto = double.tryParse(apuestaController.text) ?? sugerenciaDinero;
+                    _guardarNuevaOperacion(cuota, monto, false);
+                    Navigator.pop(context);
+                  },
+                  child: const Text("Perdida ❌", style: TextStyle(color: Colors.white)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  onPressed: () {
+                    double cuota = double.tryParse(cuotaController.text) ?? 2.0;
+                    double monto = double.tryParse(apuestaController.text) ?? sugerenciaDinero;
+                    _guardarNuevaOperacion(cuota, monto, true);
+                    Navigator.pop(context);
+                  },
+                  child: const Text("Ganada  ", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
+  void _guardarNuevaOperacion(double cuota, double montoApuesta, bool gano) {
     setState(() {
       int proximoDia = _logs.isEmpty ? 1 : _logs.last.dia + 1;
       double bancaIn = _capitalActual;
-      double apuesta = bancaIn * (_porcentajeRiesgo / 100);
       
-      double gananciaPerdida = gano ? (apuesta * (cuota - 1)) : -apuesta;
+      double gananciaPerdida = gano ? (montoApuesta * (cuota - 1)) : -montoApuesta;
       double bancaFin = bancaIn + gananciaPerdida;
 
       _logs.add(LogDia(
         dia: proximoDia,
         bancaInicial: bancaIn,
-        apuesta: apuesta,
+        apuesta: montoApuesta,
         gano: gano,
         bancaFinal: bancaFin,
       ));
@@ -218,7 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF141C26),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withAlpha((0.3 * 255).round())),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -262,25 +349,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const SizedBox(height: 20),
-              Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: const [
-                          Text("Configuración del Mes", style: TextStyle(fontWeight: FontWeight.bold)),
-                          Icon(Icons.chevron_right, color: Colors.grey, size: 16),
-                        ],
-                      ),
-                      const Divider(height: 20),
-                      _buildConfigRow("Mes de Gestión", "Mayo 2025", Colors.blue),
-                      _buildConfigRow("Capital Inicial", "\$${_capitalInicial.toStringAsFixed(2)}", Colors.green),
-                      _buildConfigRow("Cuota Promedio", _cuotaPromedio.toStringAsFixed(2), Colors.purple),
-                      _buildConfigRow("% Riesgo por Paso", "${_porcentajeRiesgo.toStringAsFixed(0)}%", Colors.orange),
-                    ],
+              GestureDetector(
+                onTap: _mostrarFormularioConfiguracion,
+                child: Card(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: const [
+                            Text("Configuración del Mes (Toca para editar)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+                            Icon(Icons.edit, color: Colors.blueAccent, size: 16),
+                          ],
+                        ),
+                        const Divider(height: 20),
+                        _buildConfigRow("Mes de Gestión", _mesGestion, Colors.blue),
+                        _buildConfigRow("Capital Inicial", "\$${_capitalInicial.toStringAsFixed(2)}", Colors.green),
+                        _buildConfigRow("Cuota Promedio", _cuotaPromedio.toStringAsFixed(2), Colors.purple),
+                        _buildConfigRow("Riesgo Base Sugerido", "${_porcentajeRiesgoDefault.toStringAsFixed(0)}%", Colors.orange),
+                      ],
+                    ),
                   ),
                 ),
               ),
